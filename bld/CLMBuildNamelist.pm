@@ -735,7 +735,7 @@ sub setup_cmdl_fates_mode {
 
     $var = "use_fates";
     if ( &value_is_true($nl_flags->{$var}) ) {
-      # This section is a place-holder to test for modules that are not allowed with ED
+      # This section is a place-holder to test for modules that are not allowed with FATES
       # the defaults which are set in the logic section of the namelist builder will
       # automatically set these correctly (well that is the assumption), but here we
       # want to set a catch to fail and warn users if they explicitly set incompatible user namelist
@@ -1139,7 +1139,7 @@ sub setup_cmdl_spinup {
      $log->fatal_error("$var has an invalid value ($val). Valid values are: @valid_values");
   }
   if ( $nl_flags->{'bgc_spinup'} eq "on" && (not &value_is_true( $nl_flags->{'use_cn'} ))  && (not &value_is_true($nl_flags->{'use_fates'})) ) {
-     $log->fatal_error("$var can not be '$nl_flags->{'bgc_spinup'}' if neither CN nor ED is turned on (use_cn=$nl_flags->{'use_cn'}, use_fates=$nl_flags->{'use_fates'}).");
+     $log->fatal_error("$var can not be '$nl_flags->{'bgc_spinup'}' if neither CN nor FATES is turned on (use_cn=$nl_flags->{'use_cn'}, use_fates=$nl_flags->{'use_fates'}).");
   }
   if ( $nl->get_value("spinup_state") eq 0 && $nl_flags->{'bgc_spinup'} eq "on" ) {
      $log->fatal_error("Namelist spinup_state contradicts the command line option bgc_spinup" );
@@ -2353,6 +2353,7 @@ sub setup_logic_dynamic_subgrid {
    setup_logic_do_transient_pfts($opts, $nl_flags, $definition, $defaults, $nl);
    setup_logic_do_transient_crops($opts, $nl_flags, $definition, $defaults, $nl);
    setup_logic_do_harvest($opts, $nl_flags, $definition, $defaults, $nl);
+   setup_logic_do_grossunrep($opts, $nl_flags, $definition, $defaults, $nl);
 
    add_default($opts, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl, 'reset_dynbal_baselines');
    if ( &value_is_true($nl->get_value('reset_dynbal_baselines')) &&
@@ -2477,7 +2478,7 @@ sub setup_logic_do_transient_crops {
       # In principle, use_fates should be compatible with
       # do_transient_crops. However, this hasn't been tested, so to be safe,
       # we are not allowing this combination for now.
-      $cannot_be_true = "$var has not been tested with ED, so for now these two options cannot be combined";
+      $cannot_be_true = "$var has not been tested with FATES, so for now these two options cannot be combined";
    }
 
    if ($cannot_be_true) {
@@ -2548,7 +2549,7 @@ sub setup_logic_do_harvest {
    } elsif (!&value_is_true($nl->get_value('use_cn'))) {
       $cannot_be_true = "$var can only be set to true when running with CN (use_cn = true)";
    } elsif (&value_is_true($nl->get_value('use_fates'))) {
-      $cannot_be_true = "$var currently doesn't work with ED";
+      $cannot_be_true = "$var currently doesn't work with FATES";
    }
 
    if ($cannot_be_true) {
@@ -2572,6 +2573,63 @@ sub setup_logic_do_harvest {
 
 #-------------------------------------------------------------------------------
 
+sub setup_logic_do_grossunrep {
+   #
+   # Set do_grossunrep default value, and perform error checking on do_grossunrep
+   #
+   # Assumes the following are already set in the namelist (although it's okay
+   # for them to be unset if that will be their final state):
+   # - flanduse_timeseries
+   # - use_cn
+   # - use_fates
+   #
+   my ($opts, $nl_flags, $definition, $defaults, $nl) = @_;
+
+   my $var = 'do_grossunrep';
+
+   # Start by assuming a default value of '.true.'. Then check a number of
+   # conditions under which do_grossunrep cannot be true. Under these
+   # conditions: (1) set default value to '.false.'; (2) make sure that the
+   # value is indeed false (e.g., that the user didn't try to set it to true).
+
+   my $default_val = ".false.";
+
+   # cannot_be_true will be set to a non-empty string in any case where
+   # do_grossunrep should not be true; if it turns out that do_grossunrep IS true
+   # in any of these cases, a fatal error will be generated
+   my $cannot_be_true = "";
+
+   if (string_is_undef_or_empty($nl->get_value('flanduse_timeseries'))) {
+      $cannot_be_true = "$var can only be set to true when running a transient case (flanduse_timeseries non-blank)";
+   }
+   elsif (!&value_is_true($nl->get_value('use_cn'))) {
+      $cannot_be_true = "$var can only be set to true when running with CN (use_cn = true)";
+   }
+   elsif (&value_is_true($nl->get_value('use_fates'))) {
+      $cannot_be_true = "$var currently doesn't work with FATES";
+   }
+
+   if ($cannot_be_true) {
+      $default_val = ".false.";
+   }
+
+   if (!$cannot_be_true) {
+      # Note that, if the variable cannot be true, we don't call add_default
+      # - so that we don't clutter up the namelist with variables that don't
+      # matter for this case
+      add_default($opts, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl, $var, val=>$default_val);
+   }
+
+   # Make sure the value is false when it needs to be false - i.e., that the
+   # user hasn't tried to set a true value at an inappropriate time.
+
+   if (&value_is_true($nl->get_value($var)) && $cannot_be_true) {
+      $log->fatal_error($cannot_be_true);
+   }
+
+}
+
+#-------------------------------------------------------------------------------
 sub setup_logic_spinup {
   my ($opts, $nl_flags, $definition, $defaults, $nl) = @_;
 
@@ -3344,7 +3402,7 @@ sub setup_logic_megan {
 
   if ($nl_flags->{'megan'} ) {
     if ( &value_is_true( $nl_flags->{'use_fates'} ) ) {
-       $log->fatal_error("MEGAN can NOT be on when ED is also on.\n" .
+       $log->fatal_error("MEGAN can NOT be on when FATES is also on.\n" .
                    "   Use the '-no-megan' option when '-bgc fates' is activated");
     }
     add_default($opts,  $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl, 'megan_specifier');

@@ -26,6 +26,7 @@ module dynSubgridControlMod
   public :: get_do_transient_crops  ! return the value of the do_transient_crops control flag
   public :: run_has_transient_landcover ! returns true if any aspects of prescribed transient landcover are enabled
   public :: get_do_harvest          ! return the value of the do_harvest control flag
+  public :: get_do_grossunrep       ! return the value of the do_grossunrep control flag
   public :: get_reset_dynbal_baselines ! return the value of the reset_dynbal_baselines control flag
   public :: get_for_testing_allow_non_annual_changes ! return true if user has requested to allow area changes at times other than the year boundary, for testing purposes
   public :: get_for_testing_zero_dynbal_fluxes ! return true if user has requested to set the dynbal water and energy fluxes to zero, for testing purposes
@@ -41,6 +42,7 @@ module dynSubgridControlMod
      logical :: do_transient_pfts  = .false. ! whether to apply transient natural PFTs from dataset
      logical :: do_transient_crops = .false. ! whether to apply transient crops from dataset
      logical :: do_harvest         = .false. ! whether to apply harvest from dataset
+     logical :: do_grossunrep      = .false. ! whether to apply gross unrepresented landcover change from dataset
 
      logical :: reset_dynbal_baselines = .false. ! whether to reset baseline values of total column water and energy in the first step of the run
 
@@ -117,6 +119,7 @@ contains
     logical :: do_transient_pfts
     logical :: do_transient_crops
     logical :: do_harvest
+    logical :: do_grossunrep
     logical :: reset_dynbal_baselines
     logical :: for_testing_allow_non_annual_changes
     logical :: for_testing_zero_dynbal_fluxes
@@ -132,6 +135,7 @@ contains
          do_transient_pfts, &
          do_transient_crops, &
          do_harvest, &
+         do_grossunrep, &
          reset_dynbal_baselines, &
          for_testing_allow_non_annual_changes, &
          for_testing_zero_dynbal_fluxes
@@ -141,6 +145,7 @@ contains
     do_transient_pfts  = .false.
     do_transient_crops = .false.
     do_harvest         = .false.
+    do_grossunrep      = .false.
     reset_dynbal_baselines = .false.
     for_testing_allow_non_annual_changes = .false.
     for_testing_zero_dynbal_fluxes = .false.
@@ -165,6 +170,7 @@ contains
     call shr_mpi_bcast (do_transient_pfts, mpicom)
     call shr_mpi_bcast (do_transient_crops, mpicom)
     call shr_mpi_bcast (do_harvest, mpicom)
+    call shr_mpi_bcast (do_grossunrep, mpicom)
     call shr_mpi_bcast (reset_dynbal_baselines, mpicom)
     call shr_mpi_bcast (for_testing_allow_non_annual_changes, mpicom)
     call shr_mpi_bcast (for_testing_zero_dynbal_fluxes, mpicom)
@@ -174,6 +180,7 @@ contains
          do_transient_pfts = do_transient_pfts, &
          do_transient_crops = do_transient_crops, &
          do_harvest = do_harvest, &
+         do_grossunrep = do_grossunrep, &
          reset_dynbal_baselines = reset_dynbal_baselines, &
          for_testing_allow_non_annual_changes = for_testing_allow_non_annual_changes, &
          for_testing_zero_dynbal_fluxes = for_testing_zero_dynbal_fluxes)
@@ -220,6 +227,11 @@ contains
        end if
        if (dyn_subgrid_control_inst%do_harvest) then
           write(iulog,*) 'ERROR: do_harvest can only be true if you are running with'
+          write(iulog,*) 'a flanduse_timeseries file (currently flanduse_timeseries is blank)'
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       if (dyn_subgrid_control_inst%do_grossunrep) then
+          write(iulog,*) 'ERROR: do_grossunrep can only be true if you are running with'
           write(iulog,*) 'a flanduse_timeseries file (currently flanduse_timeseries is blank)'
           call endrun(msg=errMsg(sourcefile, __LINE__))
        end if
@@ -273,6 +285,17 @@ contains
        end if
        if (use_fates) then
           write(iulog,*) 'ERROR: do_harvest currently does not work with use_fates'
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+    end if
+
+    if (dyn_subgrid_control_inst%do_grossunrep) then
+       if (.not. use_cn) then
+          write(iulog,*) 'ERROR: do_grossunrep can only be true if use_cn is true'
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       if (use_fates) then
+          write(iulog,*) 'ERROR: do_grossunrep currently does not work with use_fates'
           call endrun(msg=errMsg(sourcefile, __LINE__))
        end if
     end if
@@ -339,6 +362,18 @@ contains
     get_do_harvest = dyn_subgrid_control_inst%do_harvest
 
   end function get_do_harvest
+
+  !-----------------------------------------------------------------------
+  logical function get_do_grossunrep()
+    ! !DESCRIPTION:
+    ! Return the value of the do_grossunrep control flag
+    !-----------------------------------------------------------------------
+    
+    SHR_ASSERT(dyn_subgrid_control_inst%initialized, errMsg(sourcefile, __LINE__))
+
+    get_do_grossunrep = dyn_subgrid_control_inst%do_grossunrep
+
+  end function get_do_grossunrep
 
   !-----------------------------------------------------------------------
   logical function get_reset_dynbal_baselines()
