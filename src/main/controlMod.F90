@@ -122,6 +122,7 @@ contains
     use CNNDynamicsMod                   , only : CNNDynamicsReadNML
     use SoilBiogeochemDecompCascadeBGCMod, only : DecompCascadeBGCreadNML
     use CNPhenologyMod                   , only : CNPhenologyReadNML
+    use Fan2CTSMMod                      , only : fan_readnml
     use landunit_varcon                  , only : max_lunit
     !
     ! !LOCAL VARIABLES:
@@ -242,6 +243,8 @@ contains
     namelist /clm_inparm/ use_bedrock
 
     namelist /clm_inparm/ use_hydrstress
+
+    namelist /clm_inparm/ use_fan
 
     namelist /clm_inparm/ use_dynroot
 
@@ -519,7 +522,7 @@ contains
     call HumanIndexReadNML      ( NLFilename )
     call LunaReadNML            ( NLFilename )
     call FrictionVelReadNML     ( NLFilename )
-
+    
     ! ----------------------------------------------------------------------
     ! Broadcast all control information if appropriate
     ! ----------------------------------------------------------------------
@@ -546,6 +549,10 @@ contains
        call DecompCascadeBGCreadNML( NLFilename )
     end if
 
+    if ( use_fan ) then
+       call fan_readnml ( NLFilename )
+    end if
+    
     ! ----------------------------------------------------------------------
     ! consistency checks
     ! ----------------------------------------------------------------------
@@ -744,6 +751,8 @@ contains
     call mpi_bcast (use_bedrock, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     call mpi_bcast (use_hydrstress, 1, MPI_LOGICAL, 0, mpicom, ier)
+
+    call mpi_bcast (use_fan, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     call mpi_bcast (use_dynroot, 1, MPI_LOGICAL, 0, mpicom, ier)
 
@@ -1006,6 +1015,7 @@ contains
     write(iulog,*) '   user-defined soil layer structure = ', soil_layerstruct_userdefined
     write(iulog,*) '   user-defined number of soil layers = ', soil_layerstruct_userdefined_nlevsoi
     write(iulog,*) '   plant hydraulic stress = ', use_hydrstress
+    write(iulog,*) '   FAN = ', use_fan
     write(iulog,*) '   dynamic roots          = ', use_dynroot
     if (nsrest == nsrContinue) then
        write(iulog,*) 'restart warning:'

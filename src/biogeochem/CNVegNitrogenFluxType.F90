@@ -6,13 +6,13 @@ module CNVegNitrogenFluxType
   use clm_varpar                         , only : ndecomp_cascade_transitions, ndecomp_pools
   use clm_varpar                         , only : nlevdecomp_full, nlevdecomp
   use clm_varcon                         , only : spval, ispval, dzsoi_decomp
-  use clm_varctl                         , only : use_nitrif_denitrif, use_vertsoilc, use_crop
+  use clm_varctl                         , only : use_nitrif_denitrif, use_vertsoilc, use_crop, iulog
   use CNSharedParamsMod                  , only : use_fun
   use decompMod                          , only : bounds_type
   use abortutils                         , only : endrun
   use SoilBiogeochemDecompCascadeConType , only : decomp_cascade_con
   use LandunitType                       , only : lun                
-  use ColumnType                         , only : col                
+  use ColumnType                         , only	 : col                
   use PatchType                          , only : patch                
   ! 
   ! !PUBLIC TYPES:
@@ -165,6 +165,8 @@ module CNVegNitrogenFluxType
      real(r8), pointer :: livecrootn_storage_to_xfer_patch          (:)     ! patch live coarse root N shift storage to transfer (gN/m2/s)
      real(r8), pointer :: deadcrootn_storage_to_xfer_patch          (:)     ! patch dead coarse root N shift storage to transfer (gN/m2/s)
      real(r8), pointer :: fert_patch                                (:)     ! patch applied fertilizer (gN/m2/s)
+     real(r8), pointer :: manure_patch                              (:)     ! patch applied manure (gN/m2/s)
+
      real(r8), pointer :: fert_counter_patch                        (:)     ! patch >0 fertilize; <=0 not
      real(r8), pointer :: soyfixn_patch                             (:)     ! patch soybean fixed N (gN/m2/s)
 
@@ -417,6 +419,7 @@ contains
     allocate(this%grainn_xfer_to_grainn_patch               (begp:endp)) ; this%grainn_xfer_to_grainn_patch               (:) = nan
     allocate(this%grainn_storage_to_xfer_patch              (begp:endp)) ; this%grainn_storage_to_xfer_patch              (:) = nan
     allocate(this%fert_patch                                (begp:endp)) ; this%fert_patch                                (:) = nan
+    allocate(this%manure_patch                              (begp:endp)) ; this%manure_patch                              (:) = nan
     allocate(this%fert_counter_patch                        (begp:endp)) ; this%fert_counter_patch                        (:) = nan
     allocate(this%soyfixn_patch                             (begp:endp)) ; this%soyfixn_patch                             (:) = nan
 
@@ -948,6 +951,10 @@ contains
        call hist_addfld1d (fname='NFERTILIZATION', units='gN/m^2/s', &
             avgflag='A', long_name='fertilizer added', &
             ptr_patch=this%fert_patch)
+       this%manure_patch(begp:endp) = spval
+       call hist_addfld1d (fname='NMANURE', units='gN/m^2/s', &
+            avgflag='A', long_name='manure added', &
+            ptr_patch=this%manure_patch)
     end if
 
     if (use_crop .and. .not. use_fun) then
@@ -1253,13 +1260,13 @@ contains
     !-----------------------------------------------
     ! initialize nitrogen flux variables
     !-----------------------------------------------
-
     do p = bounds%begp,bounds%endp
        l = patch%landunit(p)
 
        if ( use_crop )then
           this%fert_counter_patch(p)  = spval
-          this%fert_patch(p)          = 0._r8 
+          this%fert_patch(p)          = 0._r8
+          this%manure_patch(p)          = 0._r8
           this%soyfixn_patch(p)       = 0._r8 
        end if
 
@@ -1348,6 +1355,12 @@ contains
             dim1name='pft', &
             long_name='', units='', &
             interpinic_flag='interp', readvar=readvar, data=this%fert_patch)
+
+       call restartvar(ncid=ncid, flag=flag, varname='manure', xtype=ncd_double,  &
+            dim1name='pft', &
+            long_name='', units='', &
+            interpinic_flag='interp', readvar=readvar, data=this%manure_patch)
+
     end if
 
     if (use_crop) then
