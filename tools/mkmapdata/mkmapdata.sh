@@ -227,6 +227,7 @@ else
     # Determine extra information about the destination grid file
     DST_LRGFIL=`$QUERY -var scripgriddata_lrgfile_needed $QUERYARGS`
     DST_TYPE=`$QUERY -var scripgriddata_type $QUERYARGS`
+    DST_MAXSPATIALRES=`$QUERY -var max_res $QUERYARGS`
     if [ "$DST_TYPE" = "UGRID" ]; then
         # For UGRID, we need extra information: the meshname variable
 	dst_meshname=`$QUERY -var scripgriddata_meshname $QUERYARGS`
@@ -288,7 +289,13 @@ else
 fi
 
 # Set timestamp for names below 
-CDATE="c"`date +%y%m%d`
+# The flag `-d "-0 days"` can serve as a time saver as follows:
+# If the script aborted without creating all of the map_ files and
+# the user resubmits to create the remaining files on the next day,
+# the user could change -0 to -1 to prevent the script from
+# duplicating files already generated the day before.
+#
+CDATE="c"`date -d "-0 days" +%y%m%d`
 
 # Set name of each output mapping file
 # First determine the name of the input scrip grid file  
@@ -302,6 +309,7 @@ do
    QUERYARGS="-res $grid -options lmask=$lmask,glc_nec=10 "
 
    QUERYFIL="$QUERY -var scripgriddata $QUERYARGS -onlyfiles"
+
    if [ "$verbose" = "YES" ]; then
       echo $QUERYFIL
    fi
@@ -315,8 +323,9 @@ do
 
    # Determine extra information about the source grid file
    SRC_EXTRA_ARGS[nfile]=""
-   SRC_LRGFIL[nfile]=`$QUERY -var scripgriddata_lrgfile_needed $QUERYARGS`
+   SRC_LRGFIL[nfile]="none"
    SRC_TYPE[nfile]=`$QUERY -var scripgriddata_type $QUERYARGS`
+   SRC_MAXSPATIALRES[nfile]=`$QUERY -var max_res $QUERYARGS`
    if [ "${SRC_TYPE[nfile]}" = "UGRID" ]; then
        # For UGRID, we need extra information: the meshname variable
        src_meshname=`$QUERY -var scripgriddata_meshname $QUERYARGS`
@@ -343,10 +352,9 @@ case $hostname in
      REGRID_PROC=36
   fi
   esmfvers=7.1.0r
-  intelvers=18.0.5    # Could also use intel/19.0.2 EBK 10/4/2019
-  module load esmf_libs/$esmfvers
+  intelvers=19.0.2
+  module purge
   module load intel/$intelvers
-  module load ncl
   module load nco
 
   if [[ $REGRID_PROC > 1 ]]; then
@@ -354,13 +362,18 @@ case $hostname in
   else
      mpi=uni
   fi
-  module load esmf-${esmfvers}-ncdfio-${mpi}-O
-  if [ -z "$ESMFBIN_PATH" ]; then
-     ESMFBIN_PATH=`grep ESMF_APPSDIR $ESMFMKFILE | awk -F= '{print $2}'`
-  fi
   if [ -z "$MPIEXEC" ]; then
      MPIEXEC="mpiexec_mpt -np $REGRID_PROC"
   fi
+
+  module load ncarenv
+  module load mpt
+  module load netcdf-mpi
+  module load pnetcdf
+  module load ncarcompilers
+  module load python
+  ncar_pylib
+  export PYTHONPATH="${dir}/../../../../git_ocgis/ocgis/src/:${dir}/../../../../git_esmf/esmf/src/addon/ESMPy/src/"
   ;;
 
   ## DAV
@@ -378,16 +391,9 @@ case $hostname in
     echo "Error doing module load: intel/$intelvers"
     exit 1
   fi
-  module load ncl
   module load nco
   module load netcdf
   module load ncarcompilers
-
-  module load esmflibs/$esmfvers
-  if [ $? != 0 ]; then
-    echo "Error doing module load: esmflibs/$esmfvers"
-    exit 1
-  fi
 
   if [[ $REGRID_PROC > 1 ]]; then
      mpi=mpi
@@ -396,15 +402,7 @@ case $hostname in
   else
      mpi=uni
   fi
-  module load esmf-${esmfvers}-ncdfio-${mpi}-O
-  if [ $? != 0 ]; then
-    echo "Error doing module load: esmf-${esmfvers}-ncdfio-${mpi}-O"
-    exit 1
-  fi
-  if [ -z "$ESMFBIN_PATH" ]; then
-     ESMFBIN_PATH=`grep ESMF_APPSDIR $ESMFMKFILE | awk -F= '{print $2}'`
-  fi
-  echo "ESMFMKFILE: $ESMFMKFILE"
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/lib/gcc/x86_64-redhat-linux/4.4.7:/usr/lib64:/glade/apps/opt/usr/lib:/usr/lib:/glade/u/ssg/ys/opt/intel/12.1.0.233/composer_xe_2011_sp1.11.339/compiler/lib/intel64:/lib:/lib64"
   echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
 
   if [ -z "$MPIEXEC" ]; then
@@ -418,13 +416,6 @@ case $hostname in
   ;;
 
 esac
-
-# Error checks
-if [ ! -d "$ESMFBIN_PATH" ]; then
-    echo "Path to ESMF binary directory does NOT exist: $ESMFBIN_PATH"
-    echo "Set the environment variable: ESMFBIN_PATH"
-    exit 1
-fi
 
 #----------------------------------------------------------------------
 # Generate the mapping files needed for surface dataset generation
@@ -450,17 +441,9 @@ if [ "$interactive" = "NO" ]; then
    mpirun=$MPIEXEC
    echo "Running in batch mode"
 else
-   mpirun=""
+   mpirun="mpirun -np 1"
 fi
   
-ESMF_REGRID="$ESMFBIN_PATH/ESMF_RegridWeightGen"
-if [ ! -x "$ESMF_REGRID" ]; then
-    echo "ESMF_RegridWeightGen does NOT exist in ESMF binary directory: $ESMFBIN_PATH\n"
-    echo "Upgrade to a newer version of ESMF with this utility included"
-    echo "Set the environment variable: ESMFBIN_PATH"
-    exit 1
-fi
-
 # Remove previous log files
 rm PET*.Log
 
@@ -513,16 +496,28 @@ until ((nfile>${#INGRID[*]})); do
       echo "Skipping creation of ${OUTFILE[nfile]} as fast mode is on so skipping large files in NetCDF4 format"
    else
 
-      cmd="$mpirun $ESMF_REGRID --ignore_unmapped -s ${INGRID[nfile]} "
-      cmd="$cmd -d $GRIDFILE -m conserve -w ${OUTFILE[nfile]}"
-      if [ $type = "regional" ]; then
-        cmd="$cmd --dst_regional"
+      SUBSETS_PATH=${dir}/subsets/spatial_subset.nc
+      rm -rf ${SUBSETS_PATH}
+      CHUNKDIR=${dir}/chunking
+      rm -rf ${CHUNKDIR}
+      OCLI_FILE=${dir}/../../../../git_ocgis/ocgis/src/ocgis/ocli.py
+      CLI_EXECUTABLE="python ${OCLI_FILE} chunked-rwg"
+
+      if [ "$type" = "global" ]; then
+         # NCHUNKS_DST = 10 works for all DST resolutions
+         # NCHUNKS_DST = 20 fails for 10x15
+         # Possible to calculate from DST_MAXSPATIALRES?
+         NCHUNKS_DST=10
+         cmd="$mpirun ${CLI_EXECUTABLE} --source ${INGRID[nfile]} --destination ${GRIDFILE} --esmf_regrid_method CONSERVE --nchunks_dst ${NCHUNKS_DST} --wd ${CHUNKDIR} --weight ${OUTFILE[nfile]} --persist --esmf_src_type ${SRC_TYPE[nfile]} --esmf_dst_type ${DST_TYPE} --src_resolution ${SRC_MAXSPATIALRES[nfile]} --dst_resolution ${DST_MAXSPATIALRES} --weightfilemode WITHAUX --64bit_offset"
+         runcmd $cmd
+      else
+         NCHUNKS_DST=1
+         cmd="$mpirun ${CLI_EXECUTABLE} --source ${INGRID[nfile]} --destination ${GRIDFILE} --spatial_subset --no_genweights --spatial_subset_path ${SUBSETS_PATH} --esmf_src_type ${SRC_TYPE[nfile]} --esmf_dst_type ${DST_TYPE} --src_resolution ${SRC_MAXSPATIALRES[nfile]}"
+         runcmd $cmd
+
+         cmd="$mpirun ${CLI_EXECUTABLE} --source ${SUBSETS_PATH} --destination ${GRIDFILE} --esmf_regrid_method CONSERVE --nchunks_dst ${NCHUNKS_DST} --wd ${CHUNKDIR} --weight ${OUTFILE[nfile]} --persist --esmf_src_type ${SRC_TYPE[nfile]} --esmf_dst_type ${DST_TYPE} --src_resolution ${SRC_MAXSPATIALRES[nfile]} --dst_resolution ${DST_MAXSPATIALRES} --weightfilemode WITHAUX --64bit_offset"
+         runcmd $cmd
       fi
-
-      cmd="$cmd --src_type ${SRC_TYPE[nfile]} ${SRC_EXTRA_ARGS[nfile]} --dst_type $DST_TYPE $DST_EXTRA_ARGS"
-      cmd="$cmd $lrgfil"
-
-      runcmd $cmd
 
       if [ "$debug" != "YES" ] && [ ! -f "${OUTFILE[nfile]}" ]; then
          echo "Output mapping file was NOT created: ${OUTFILE[nfile]}"
@@ -535,13 +530,6 @@ until ((nfile>${#INGRID[*]})); do
       runcmd "ncatted -a hostname,global,a,c,$HOST   -h ${OUTFILE[nfile]}"
       runcmd "ncatted -a logname,global,a,c,$LOGNAME -h ${OUTFILE[nfile]}"
 
-      # check for duplicate mapping weights
-      newfile="rmdups_${OUTFILE[nfile]}"
-      runcmd "rm -f $newfile"
-      runcmd "env MAPFILE=${OUTFILE[nfile]} NEWMAPFILE=$newfile ncl $dir/rmdups.ncl"
-      if [ -f "$newfile" ]; then
-         runcmd "mv $newfile ${OUTFILE[nfile]}"
-      fi
    fi
 
    nfile=nfile+1

@@ -1162,6 +1162,11 @@ Toggle to turn on on diagnostic Snow Radiative Effect
 SCRIP format grid data file
 </entry>
 
+<entry id="unstructdata" type="char*256" category="mkmapdata"
+       input_pathname="abs" group="clmexp" valid_values="" >
+UNSTRUCT format grid data file
+</entry>
+
 <entry id="scripgriddata_lrgfile_needed" type="char*256" category="mkmapdata"
        group="clmexp" valid_values="none,64bit_offset,netcdf4" >
 Flag to pass to the ESMF mapping utility, telling it what kind of large
@@ -1175,11 +1180,23 @@ Flag to pass to the ESMF mapping utility, telling it what kind of grid
 file this is (SCRIP or UGRID).
 </entry>
 
+<entry id="unstructdata_type" type="char*256" category="mkmapdata"
+       group="clmexp" valid_values="ESMFMESH" >
+Flag to pass to the ESMF mapping utility, telling it what kind of grid
+file this is.
+</entry>
+
 <entry id="scripgriddata_meshname" type="char*256" category="mkmapdata"
        group="clmexp" valid_values="" >
 For UGRID files, flag to pass to the ESMF mapping utility, telling it the
 name of the dummy variable that has all of the topology information stored
 in its attributes. (Only used if scripgriddata_src_type = UGRID.)
+</entry>
+
+<entry id="max_res" type="real" category="mkmapdata"
+       group="clmexp" valid_values="" >
+Maximum resolution of source and destination files required by the ocgis
+tool.
 </entry>
 
 <!--                                                   -->
