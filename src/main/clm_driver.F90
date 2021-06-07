@@ -9,7 +9,7 @@ module clm_driver
   !
   ! !USES:
   use shr_kind_mod           , only : r8 => shr_kind_r8
-  use clm_varctl             , only : wrtdia, iulog, use_fates
+  use clm_varctl             , only : wrtdia, iulog, use_fates,use_fates_sp
   use clm_varctl             , only : use_cn, use_lch4, use_noio, use_c13, use_c14
   use clm_varctl             , only : use_crop, irrigate, ndep_from_cpl
   use clm_varctl             , only : use_soil_moisture_streams
@@ -26,7 +26,7 @@ module clm_driver
   use abortutils             , only : endrun
   !
   use dynSubgridDriverMod    , only : dynSubgrid_driver, dynSubgrid_wrapup_weight_changes
-  use BalanceCheckMod        , only : BeginWaterBalance, BalanceCheck
+  use BalanceCheckMod        , only : WaterGridcellBalance, BeginWaterColumnBalance, BalanceCheck
   !
   use BiogeophysPreFluxCalcsMod  , only : BiogeophysPreFluxCalcs
   use SurfaceHumidityMod     , only : CalculateSurfaceHumidity
@@ -74,13 +74,11 @@ module clm_driver
   use DaylengthMod           , only : UpdateDaylength
   use perf_mod
   !
-  use clm_instMod            , only : nutrient_competition_method
   use GridcellType           , only : grc
   use LandunitType           , only : lun
   use ColumnType             , only : col
   use PatchType              , only : patch
   use clm_instMod
-  use clm_instMod            , only : soil_water_retention_curve
   use EDBGCDynMod            , only : EDBGCDyn, EDBGCDynSummary
   use SoilMoistureStreamMod  , only : PrescribedSoilMoistureInterp, PrescribedSoilMoistureAdvance
   !
@@ -113,7 +111,7 @@ contains
     use clm_time_manager     , only : get_curr_date
     use clm_varctl           , only : use_lai_streams, fates_spitfire_mode
     use SatellitePhenologyMod, only : lai_advance
-    use CNFireFactoryMod     , only : scalar_lightning
+    use FATESFireFactoryMod  , only : scalar_lightning
     !
     ! !ARGUMENTS:
     implicit none
@@ -239,7 +237,7 @@ contains
        ! vegetation top [mhvt1,mhvt2] and vegetation bottom [mhvb1,mhvb2]. The
        ! weights obtained here are used in subroutine SatellitePhenology to obtain time
        ! interpolated values.
-       if (doalb .or. ( n_drydep > 0 .and. drydep_method == DD_XLND )) then
+       if (doalb .or. ( n_drydep > 0 .and. drydep_method == DD_XLND ) .or. use_fates_sp) then
           call t_startf('interpMonthlyVeg')
           call interpMonthlyVeg(bounds_proc, canopystate_inst)
           call t_stopf('interpMonthlyVeg')
@@ -327,6 +325,13 @@ contains
        end if
        call t_stopf('begcnbal_grc')
 
+       call t_startf('begwbal')
+       call WaterGridcellBalance(bounds_clump, &
+            filter(nc)%num_nolakec, filter(nc)%nolakec, &
+            filter(nc)%num_lakec, filter(nc)%lakec, &
+            water_inst, lakestate_inst, &
+            use_aquifer_layer = use_aquifer_layer(), flag = 'begwb')
+       call t_stopf('begwbal')
     end do
     !$OMP END PARALLEL DO
 
@@ -362,9 +367,9 @@ contains
     ! For water: Currently, I believe this needs to be done after weights are updated for
     ! prescribed transient patches or CNDV, because column-level water is not generally
     ! conserved when weights change (instead the difference is put in the grid cell-level
-    ! terms, qflx_liq_dynbal, etc.). In the future, we may want to change the balance
-    ! checks to ensure that the grid cell-level water is conserved, considering
-    ! qflx_liq_dynbal; in this case, the call to BeginWaterBalance should be moved to
+    ! terms, qflx_liq_dynbal, etc.). Grid cell-level balance
+    ! checks ensure that the grid cell-level water is conserved by considering
+    ! qflx_liq_dynbal and calling WaterGridcellBalance
     ! before the weight updates.
     !
     ! For carbon & nitrogen: This needs to be done after dynSubgrid_driver, because the
@@ -382,7 +387,7 @@ contains
           call t_stopf('prescribed_sm')
        endif
        call t_startf('begwbal')
-       call BeginWaterBalance(bounds_clump,                   &
+       call BeginWaterColumnBalance(bounds_clump,             &
             filter(nc)%num_nolakec, filter(nc)%nolakec,       &
             filter(nc)%num_lakec, filter(nc)%lakec,           &
             water_inst, soilhydrology_inst, lakestate_inst, &
@@ -614,6 +619,8 @@ contains
             soilstate_inst, temperature_inst, &
             water_inst%wateratm2lndbulk_inst, water_inst%waterdiagnosticbulk_inst, &
             water_inst%waterstatebulk_inst)
+
+       call ozone_inst%CalcOzoneStress(bounds_clump, filter(nc)%num_exposedvegp, filter(nc)%exposedvegp)
 
        ! TODO(wjs, 2019-10-02) I'd like to keep moving this down until it is below
        ! LakeFluxes... I'll probably leave it in place there.
@@ -995,9 +1002,9 @@ contains
 
        end if
 
-                ! Prescribed biogeography - prescribed canopy structure, some prognostic carbon fluxes
+       ! Prescribed biogeography - prescribed canopy structure, some prognostic carbon fluxes
 
-       if ((.not. use_cn) .and. (.not. use_fates) .and. (doalb)) then
+       if (((.not. use_cn) .and. (.not. use_fates) .and. (doalb)).or.(use_fates_sp.and.(doalb))) then
           call t_startf('SatellitePhenology')
           call SatellitePhenology(bounds_clump, filter(nc)%num_nolakep, filter(nc)%nolakep, &
                water_inst%waterdiagnosticbulk_inst, canopystate_inst)
@@ -1112,20 +1119,8 @@ contains
 
        call water_inst%Summary(bounds_clump, &
             filter(nc)%num_soilp, filter(nc)%soilp, &
-            filter(nc)%num_allc, filter(nc)%allc)
-
-       ! ============================================================================
-       ! Check the energy and water balance
-       ! ============================================================================
-
-       call t_startf('balchk')
-       call BalanceCheck(bounds_clump, &
             filter(nc)%num_allc, filter(nc)%allc, &
-            atm2lnd_inst, solarabs_inst, water_inst%waterfluxbulk_inst, &
-            water_inst%waterstatebulk_inst, water_inst%waterdiagnosticbulk_inst, &
-            water_inst%waterbalancebulk_inst, water_inst%wateratm2lndbulk_inst, &
-            surfalb_inst, energyflux_inst, canopystate_inst)
-       call t_stopf('balchk')
+            filter(nc)%num_nolakec, filter(nc)%nolakec)
 
        ! ============================================================================
        ! Check the carbon and nitrogen balance
@@ -1133,6 +1128,7 @@ contains
 
        if (use_cn) then
           call t_startf('cnbalchk')
+          write(iulog,*) 'clm_drv: pre-bgc_veg balance check'
           call bgc_vegetation_inst%BalanceCheck( &
                bounds_clump, filter(nc)%num_soilc, filter(nc)%soilc, &
                soilbiogeochem_carbonflux_inst, &
@@ -1280,6 +1276,31 @@ contains
     !$OMP END PARALLEL DO
     call t_stopf('lnd2glc')
 
+    ! ==========================================================================
+    ! Check the energy and water balance
+    ! ==========================================================================
+
+    call t_startf('balchk')
+    !$OMP PARALLEL DO PRIVATE (nc, bounds_clump)
+    do nc = 1,nclumps
+       call get_clump_bounds(nc, bounds_clump)
+       call WaterGridcellBalance(bounds_clump, &
+            filter(nc)%num_nolakec, filter(nc)%nolakec, &
+            filter(nc)%num_lakec, filter(nc)%lakec, &
+            water_inst, lakestate_inst, &
+            use_aquifer_layer = use_aquifer_layer(), flag = 'endwb')
+       write(iulog,*) 'clm_drv: post water grid cell balance check'
+       call BalanceCheck(bounds_clump, &
+            filter(nc)%num_allc, filter(nc)%allc, &
+            atm2lnd_inst, solarabs_inst, water_inst%waterfluxbulk_inst, &
+            water_inst%waterstatebulk_inst, water_inst%waterdiagnosticbulk_inst, &
+            water_inst%waterbalancebulk_inst, water_inst%wateratm2lndbulk_inst, &
+            water_inst%waterlnd2atmbulk_inst, surfalb_inst, energyflux_inst, &
+            canopystate_inst)
+    end do
+    !$OMP END PARALLEL DO
+    call t_stopf('balchk')
+
     ! ============================================================================
     ! Write global average diagnostics to standard output
     ! ============================================================================
@@ -1371,6 +1392,7 @@ contains
        ! Create history and write history tapes if appropriate
        call t_startf('clm_drv_io_htapes')
 
+       write(iulog,*) 'clm_drv: calling hist_htapes_wrapup'
        call hist_htapes_wrapup( rstwr, nlend, bounds_proc,                    &
             soilstate_inst%watsat_col(bounds_proc%begc:bounds_proc%endc, 1:), &
             soilstate_inst%sucsat_col(bounds_proc%begc:bounds_proc%endc, 1:), &

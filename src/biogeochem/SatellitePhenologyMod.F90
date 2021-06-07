@@ -17,8 +17,7 @@ module SatellitePhenologyMod
   use shr_log_mod     , only : errMsg => shr_log_errMsg
   use decompMod       , only : bounds_type
   use abortutils      , only : endrun
-  use clm_varctl      , only : scmlat,scmlon,single_column
-  use clm_varctl      , only : iulog, use_lai_streams, inst_name
+  use clm_varctl      , only : iulog, use_lai_streams, inst_name, use_fates_sp
   use clm_varcon      , only : grlnd
   use controlMod      , only : NLFilename
   use decompMod       , only : gsmap_lnd_gdc2glo
@@ -284,6 +283,7 @@ contains
        else                       ! non-vegetated pft
           canopystate_inst%tlai_patch(p) = 0._r8
        endif
+
     end do
 
   end subroutine lai_interp
@@ -351,6 +351,7 @@ contains
     integer  :: fp,p,c                            ! indices
     real(r8) :: ol                                ! thickness of canopy layer covered by snow (m)
     real(r8) :: fb                                ! fraction of canopy layer covered by snow
+    integer  :: nploop
     !-----------------------------------------------------------------------
 
     associate(                                                           &
@@ -364,15 +365,28 @@ contains
          hbot               => canopystate_inst%hbot_patch    ,          & ! Output: [real(r8) (:) ] canopy bottom (m)
          frac_veg_nosno_alb => canopystate_inst%frac_veg_nosno_alb_patch & ! Output: [integer  (:) ] fraction of vegetation not covered by snow (0 OR 1) [-]
          )
-
+       
       if (use_lai_streams) then
          call lai_interp(bounds, canopystate_inst)
       endif
 
 
-      do fp = 1, num_nolakep
-         p = filter_nolakep(fp)
+      if(use_fates_sp)then
+        ! when we use FATES SP mode, the inactive points are not in the nolakep filter
+        ! thus we need to force a loop around all patches to get at the SP inputs the
+        ! are indexed in the HLM 'P' space.
+        nploop = bounds%endp-bounds%begp+1 
+      else
+        nploop=num_nolakep
+      endif
+      do fp = 1, nploop
+         if(use_fates_sp)then
+          p = fp + bounds%begp -1 
+        else
+          p = filter_nolakep(fp)
+        endif
          c = patch%column(p)
+         
 
          ! need to update elai and esai only every albedo time step so do not
          ! have any inconsistency in lai and sai between SurfaceAlbedo calls (i.e.,
@@ -416,19 +430,23 @@ contains
          endif
 
          ! area weight by snow covered fraction
-         elai(p) = max(tlai(p)*(1.0_r8 - frac_sno(c)) + tlai(p)*fb*frac_sno(c), 0.0_r8)
-         esai(p) = max(tsai(p)*(1.0_r8 - frac_sno(c)) + tsai(p)*fb*frac_sno(c), 0.0_r8)
-         if (elai(p) < 0.05_r8) elai(p) = 0._r8
-         if (esai(p) < 0.05_r8) esai(p) = 0._r8
+         if(.not.use_fates_sp)then
+     
+         ! Do not set these in FATES_SP mode as they turn on the 'vegsol' filter and also
+         ! are duplicated by the FATE variables (in the FATES IFP indexing space) 
+           elai(p) = max(tlai(p)*(1.0_r8 - frac_sno(c)) + tlai(p)*fb*frac_sno(c), 0.0_r8)
+           esai(p) = max(tsai(p)*(1.0_r8 - frac_sno(c)) + tsai(p)*fb*frac_sno(c), 0.0_r8)
+           if (elai(p) < 0.05_r8) elai(p) = 0._r8
+           if (esai(p) < 0.05_r8) esai(p) = 0._r8
 
-         ! Fraction of vegetation free of snow
+           ! Fraction of vegetation free of snow
 
-         if ((elai(p) + esai(p)) >= 0.05_r8) then
-            frac_veg_nosno_alb(p) = 1
-         else
-            frac_veg_nosno_alb(p) = 0
-         end if
-
+           if ((elai(p) + esai(p)) >= 0.05_r8) then
+              frac_veg_nosno_alb(p) = 1
+           else
+              frac_veg_nosno_alb(p) = 0
+           end if
+         endif !fates_sp
       end do ! end of patch loop
 
     end associate
@@ -501,7 +519,6 @@ contains
     use domainMod   , only : ldomain
     use fileutils   , only : getfil
     use clm_varctl  , only : fsurdat
-    use shr_scam_mod, only : shr_scam_getCloseLatLon
     !
     ! !ARGUMENTS:
     type(bounds_type), intent(in) :: bounds
@@ -511,7 +528,6 @@ contains
     type(file_desc_t) :: ncid             ! netcdf id
     real(r8), pointer :: annlai(:,:)      ! 12 months of monthly lai from input data set
     real(r8), pointer :: mlai(:,:)        ! lai read from input files
-    real(r8):: closelat,closelon          ! single column vars
     integer :: ier                        ! error code
     integer :: g,k,l,m,n,p                ! indices
     integer :: ni,nj,ns                   ! indices
@@ -520,7 +536,6 @@ contains
     integer :: nlon_i                     ! number of input data longitudes
     integer :: nlat_i                     ! number of input data latitudes
     integer :: npft_i                     ! number of input data patch types
-    integer :: closelatidx,closelonidx    ! single column vars
     logical :: isgrid2d                   ! true => file is 2d
     character(len=256) :: locfn           ! local file name
     character(len=32) :: subname = 'readAnnualVegetation'
@@ -552,11 +567,6 @@ contains
        call endrun(msg=errMsg(sourcefile, __LINE__))
     end if
     call check_dim_size(ncid, 'lsmpft', maxsoil_patches)
-
-    if (single_column) then
-       call shr_scam_getCloseLatLon(locfn, scmlat, scmlon, &
-            closelat, closelon, closelatidx, closelonidx)
-    endif
 
     do k=1,12   !! loop over months and read vegetated data
 
@@ -600,7 +610,6 @@ contains
     use pftconMod        , only : noveg
     use fileutils        , only : getfil
     use spmdMod          , only : masterproc, mpicom, MPI_REAL8, MPI_INTEGER
-    use shr_scam_mod     , only : shr_scam_getCloseLatLon
     use clm_time_manager , only : get_nstep
     use netcdf
     !
@@ -620,8 +629,6 @@ contains
     integer :: nlat_i                     ! number of input data latitudes
     integer :: npft_i                     ! number of input data patch types
     integer :: ier                        ! error code
-    integer :: closelatidx,closelonidx
-    real(r8):: closelat,closelon
     logical :: readvar
     real(r8), pointer :: mlai(:,:)        ! lai read from input files
     real(r8), pointer :: msai(:,:)        ! sai read from input files
@@ -650,11 +657,6 @@ contains
 
     call getfil(fveg, locfn, 0)
     call ncd_pio_openfile (ncid, trim(locfn), 0)
-
-    if (single_column) then
-       call shr_scam_getCloseLatLon (ncid, scmlat, scmlon, closelat, closelon,&
-            closelatidx, closelonidx)
-    endif
 
     do k=1,2   !loop over months and read vegetated data
 

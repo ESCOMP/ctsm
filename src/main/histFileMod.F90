@@ -3218,7 +3218,7 @@ contains
           endif
 
        else if (mode == 'write') then
-
+       
           ! Determine output buffer
 
           histo => tape(t)%hlist(f)%hbuf
@@ -3703,6 +3703,7 @@ contains
              end if
 
              ! Define model field variables
+             write(iulog,*) ' hfields_write: define'
              call hfields_write(t, mode='define')
 
              ! Exit define model
@@ -3736,6 +3737,7 @@ contains
           call t_stopf('hist_htapes_wrapup_tconst')
 
           ! Write history time samples
+          write(iulog,*) ' hfields_write: write'
           call t_startf('hist_htapes_wrapup_write')
           call hfields_write(t, mode='write')
           call t_stopf('hist_htapes_wrapup_write')
