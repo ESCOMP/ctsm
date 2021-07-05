@@ -21,10 +21,15 @@ module OzoneBaseMod
      ! Public data members
      ! These should be treated as read-only by other modules (except that they can be
      ! modified by extensions of the ozone_base_type)
-     real(r8), pointer, public :: o3coefvsha_patch(:)  ! ozone coefficient for photosynthesis, shaded leaves (0 - 1)
-     real(r8), pointer, public :: o3coefvsun_patch(:)  ! ozone coefficient for photosynthesis, sunlit leaves (0 - 1)
-     real(r8), pointer, public :: o3coefgsha_patch(:)  ! ozone coefficient for conductance, shaded leaves (0 - 1)
-     real(r8), pointer, public :: o3coefgsun_patch(:)  ! ozone coefficient for conductance, sunlit leaves (0 - 1)
+     real(r8), pointer, public :: o3coefvsha_patch(:)          ! ozone coefficient for photosynthesis, shaded leaves (0 - 1)
+     real(r8), pointer, public :: o3coefvsun_patch(:)         ! ozone coefficient for photosynthesis, sunlit leaves (0 - 1)
+     real(r8), pointer, public :: o3coefgsha_patch(:)         ! ozone coefficient for conductance, shaded leaves (0 - 1)
+     real(r8), pointer, public :: o3coefgsun_patch(:)         ! ozone coefficient for conductance, sunlit leaves (0 - 1)
+     real(r8), pointer, public :: o3coefjmaxsha_patch(:)  ! ozone coefficient for max electron transport rate, shaded leaves (0 - 1)
+     real(r8), pointer, public :: o3coefjmaxsun_patch(:)  ! ozone coefficient for max electron transport rate, sunlit leaves (0 - 1)
+
+
+
      
      
    contains
@@ -42,12 +47,14 @@ module OzoneBaseMod
 
   abstract interface
 
-     subroutine Init_interface(this, bounds)
+     subroutine Init_interface(this, bounds, o3_veg_stress_method)
        use decompMod, only : bounds_type
        import :: ozone_base_type
 
        class(ozone_base_type), intent(inout) :: this
        type(bounds_type), intent(in) :: bounds
+       character(len=*),        intent(in) :: o3_veg_stress_method
+
      end subroutine Init_interface
   
      subroutine Restart_interface(this, bounds, ncid, flag)
@@ -115,11 +122,14 @@ contains
     begp = bounds%begp
     endp = bounds%endp
 
-    allocate(this%o3coefvsha_patch(begp:endp))  ; this%o3coefvsha_patch(:) = nan
-    allocate(this%o3coefvsun_patch(begp:endp))  ; this%o3coefvsun_patch(:) = nan
-    allocate(this%o3coefgsha_patch(begp:endp))  ; this%o3coefgsha_patch(:) = nan
-    allocate(this%o3coefgsun_patch(begp:endp))  ; this%o3coefgsun_patch(:) = nan
+    allocate(this%o3coefvsha_patch(begp:endp))  ; this%o3coefvsha_patch(:)                = nan
+    allocate(this%o3coefvsun_patch(begp:endp))  ; this%o3coefvsun_patch(:)                = nan
+    allocate(this%o3coefgsha_patch(begp:endp))  ; this%o3coefgsha_patch(:)                = nan
+    allocate(this%o3coefgsun_patch(begp:endp))  ; this%o3coefgsun_patch(:)               = nan
+    allocate(this%o3coefjmaxsha_patch(begp:endp))  ; this%o3coefjmaxsha_patch(:) = nan
+    allocate(this%o3coefjmaxsun_patch(begp:endp))  ; this%o3coefjmaxsun_patch(:) = nan
     
+
   end subroutine InitAllocateBase
 
 
@@ -146,10 +156,12 @@ contains
     begp = bounds%begp
     endp = bounds%endp
 
-    this%o3coefvsha_patch(begp:endp) = 1._r8
-    this%o3coefvsun_patch(begp:endp) = 1._r8
-    this%o3coefgsha_patch(begp:endp) = 1._r8
-    this%o3coefgsun_patch(begp:endp) = 1._r8
+    this%o3coefvsha_patch(begp:endp)        = 1._r8
+    this%o3coefvsun_patch(begp:endp)        = 1._r8
+    this%o3coefgsha_patch(begp:endp)        = 1._r8
+    this%o3coefgsun_patch(begp:endp)        = 1._r8
+    this%o3coefjmaxsha_patch(begp:endp) = 1._r8
+    this%o3coefjmaxsun_patch(begp:endp) = 1._r8
 
   end subroutine InitColdBase
 

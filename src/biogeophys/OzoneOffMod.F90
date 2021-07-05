@@ -60,12 +60,25 @@ contains
   end function constructor
 
 
-  subroutine Init(this, bounds)
+  subroutine Init(this,  bounds, o3_veg_stress_method)
+    !
+    ! !DESCRIPTION:
+    ! Initialize ozone data structure
+    !
+    ! ! USES:
+    use abortutils,only : endrun
+    !
+    ! !ARGUMENTS:
     class(ozone_off_type) , intent(inout) :: this
-    type(bounds_type)     , intent(in)    :: bounds
+    type(bounds_type)     , intent(in)           :: bounds
+    character(len=*), intent(in)                      :: o3_veg_stress_method 
+    !-----------------------------------------------------------------------
 
+    if (o3_veg_stress_method /= 'unset' ) call endrun(' unconsistent choice of o3_veg_stress_method in init OzoneOffMod.')
+    
     call this%InitAllocateBase(bounds)
     call this%InitColdBase(bounds)
+
   end subroutine Init
 
   subroutine Restart(this, bounds, ncid, flag)
@@ -115,7 +128,9 @@ contains
     integer              , intent(in) :: num_exposedvegp
     integer              , intent(in) :: filter_exposedvegp(:)
 
-    ! Do nothing: Outputs (stress terms) are already fixed at 1 from cold start initialization
+
+    ! Outputs (stress terms) are already fixed at 1 from cold start initialization
+
   end subroutine CalcOzoneStress
 
 end module OzoneOffMod
