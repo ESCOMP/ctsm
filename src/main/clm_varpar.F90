@@ -9,7 +9,8 @@ module clm_varpar
   use shr_sys_mod  , only: shr_sys_abort
   use spmdMod      , only: masterproc
   use clm_varctl   , only: use_extralakelayers, use_vertsoilc
-  use clm_varctl   , only: use_century_decomp, use_c13, use_c14
+  use clm_varctl   , only: use_century_decomp, use_mimics_decomp
+  use clm_varctl   , only: use_c13, use_c14
   use clm_varctl   , only: iulog, use_crop, create_crop_landunit, irrigate
   use clm_varctl   , only: use_vichydro, rundef
   use clm_varctl   , only: soil_layerstruct_predefined
@@ -244,7 +245,10 @@ contains
        if (use_century_decomp) then
           ndecomp_pools = 6
           ndecomp_cascade_transitions = 8
-       else  ! TODO slevis: Currently for CN. MIMICS will get its own.
+       else if (use_mimics_decomp) then
+          ndecomp_pools = ?
+          ndecomp_cascade_transitions = ?
+       else  ! TODO slevis: Currently for CN (deprecated)
           ndecomp_pools = 7
           ndecomp_cascade_transitions = 7
        end if
@@ -252,7 +256,10 @@ contains
        if (use_century_decomp) then
           ndecomp_pools = 7
           ndecomp_cascade_transitions = 10
-       else  ! TODO slevis: Currently for CN. MIMICS will get its own.
+       else if (use_mimics_decomp) then
+          ndecomp_pools = ?
+          ndecomp_cascade_transitions = ?
+       else  ! TODO slevis: Currently for CN (deprecated)
           ndecomp_pools = 8
           ndecomp_cascade_transitions = 9
        end if
